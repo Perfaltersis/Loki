@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.92.0
+          args:
+            - "--config=/etc/otel-collector-config/otel-config.yml"
+          volumeMounts:
+            - name: otel-config
+              mountPath: /etc/otel-collector-config
+          resources:
+            limits:
+              cpu: 300m
+              memory: 500Mi
+            requests:
+              cpu: 150m
+              memory: 250Mi
+          ports:
+            - containerPort: 4317
+              protocol: TCP
+            - containerPort: 4318
+              protocol: TCP
+            - containerPort: 55678
+              protocol: TCP
+            - containerPort: 55679
+              protocol: TCP
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+data:
+  otel-config.yml: |
+    receivers:
+      otlp:
+        protocols: 
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+    connectors:
+      spanmetrics:
+    processors:
+      batch:
+    exporters:
+      logging:
+      otlp:
+        endpoint: "http://tempo-distributor.lab-apo-tempo.svc.cluster.local:4317"
+        tls:
+          insecure: true  
+        headers:
+          X-Scope-OrgID: "apo"
+      prometheusremotewrite:
+        endpoint: "http://mimir-distributor.lab-apo-mimir.svc.cluster.local:8080/api/v1/push"
+        headers:
+          X-Scope-OrgID: "apo"
+      loki:
+        endpoint: "http://loki-loki-distributed-distributor.lab-apo-loki.svc.cluster.local:3100/loki/api/v1/push"
+        default_labels_enabled:
+          exporter: false
+          job: true
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp,spanmetrics]
+          processors: [batch]
+          exporters: [prometheusremotewrite,logging]
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [spanmetrics,otlp,logging]
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [loki,logging]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opentelemetry
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: 4317-tcp
+      protocol: TCP
+      port: 4317
+      targetPort: 4317
+    - name: 4318-tcp
+      protocol: TCP
+      port: 4318
+      targetPort: 4318
+  type: LoadBalancer

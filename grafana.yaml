@@ -1,0 +1,7 @@
+securityContext:
+  runAsUser: null
+  runAsGroup: null
+  fsGroup: null
+  runAsNonRoot: null
+persistence:
+  enabled: true
